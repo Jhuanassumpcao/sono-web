@@ -1,5 +1,5 @@
 const PDFJS_VERSION = '3.11.174';
-const LINE_TOLERANCE = 3;
+const LINE_TOLERANCE = 5;
 const MIN_TEXT_CHARS = 20;
 const MIN_IMAGE_SIZE = 40;
 

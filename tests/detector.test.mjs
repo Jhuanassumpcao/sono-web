@@ -150,3 +150,54 @@ test('table-format answer key maps numbers row to letters row', () => {
   assert.deepEqual(r.answerKey, { 1: 'B', 2: 'A' });
   assert.equal(r.questions[1].answer, 'A');
 });
+
+import { cleanLines } from '../src/detector.js';
+
+test('bare options "A texto" without separator are detected', () => {
+  const r = detect(L([
+    'Questão 1 Tema', 'Qual a conduta?', 'A Tomografia', 'B Ressonância', 'C Biópsia', 'D Nada', 'E N.D.A.',
+    'Questão 2 Outro', 'Pergunta?', 'A Sim', 'B Não', 'Respostas:', '1 B 2 A',
+  ]), []);
+  assert.equal(r.questions.length, 2);
+  assert.deepEqual(r.questions[0].options.map((o) => o.key), ['A', 'B', 'C', 'D', 'E']);
+  assert.equal(r.questions[0].text, 'Tema Qual a conduta?');
+  assert.equal(r.questions[0].answer, 'B');
+});
+
+test('statement line starting with "A " is not option A when real options follow', () => {
+  const r = detect(L([
+    '1. Caso', 'A paciente refere dor.', 'Qual o diagnóstico?', 'A Lúpus', 'B Artrite', 'C Gota',
+  ]), []);
+  assert.equal(r.questions[0].options.length, 3);
+  assert.equal(r.questions[0].options[0].text, 'Lúpus');
+  assert.match(r.questions[0].text, /A paciente refere dor\./);
+});
+
+test('option text starting with a capital letter does not break the sequence', () => {
+  const r = detect(L(['1. P?', 'A Sim', 'B Não', 'C A dosagem é alta', 'D N.D.A.']), []);
+  assert.deepEqual(r.questions[0].options.map((o) => o.text), ['Sim', 'Não', 'A dosagem é alta', 'N.D.A.']);
+});
+
+test('cleanLines repairs fi ligatures extracted as 3 or <', () => {
+  const out = cleanLines(L(['intensi3caram e Tomogra<a posi- tivo CD3, CD4 e C5a']));
+  assert.equal(out[0].text, 'intensificaram e Tomografia positivo CD3, CD4 e C5a');
+});
+
+test('cleanLines drops boilerplate repeated on 3+ pages but keeps options and question headings', () => {
+  const lines = [];
+  for (let p = 1; p <= 4; p++) {
+    lines.push({ text: `Questão ${p} Tema`, page: p, y: 10 });
+    lines.push({ text: 'E N.D.A.', page: p, y: 20 });
+    lines.push({ text: `Essa questão possui comentário no site 40000${p}`, page: p, y: 30 });
+    lines.push({ text: 'proibida venda', page: p, y: 40 });
+  }
+  const out = cleanLines(lines).map((l) => l.text);
+  assert.equal(out.length, 8);
+  assert.ok(out.includes('E N.D.A.'));
+  assert.ok(!out.some((t) => /proibida|Essa questão/.test(t)));
+});
+
+test('cleanLines drops stray numeric codes but keeps answer-key number rows', () => {
+  const out = cleanLines(L(['A Texto da opção', '4 0001903 91', 'Gabarito', '1 2 3', 'A B C'])).map((l) => l.text);
+  assert.deepEqual(out, ['A Texto da opção', 'Gabarito', '1 2 3', 'A B C']);
+});
