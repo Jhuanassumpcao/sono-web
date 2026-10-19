@@ -100,3 +100,108 @@ test('listAllExams and listAllAttempts return everything regardless of folder', 
   assert.deepEqual((await s.listAllExams()).map((e) => e.title).sort(), ['E1', 'E2']);
   assert.equal((await s.listAllAttempts()).length, 2);
 });
+
+// ---- Tarefa 2: registros versionados, exclusão lógica, outbox e migração v1 -> v2 ----
+
+test('writes stamp updatedAt and renaming bumps it monotonically', async () => {
+  const f = await s.createFolder('A', null);
+  const first = await s.getRecord('folders', f.id);
+  assert.ok(first.updatedAt > 0);
+  await s.renameFolder(f.id, 'B');
+  const second = await s.getRecord('folders', f.id);
+  assert.ok(second.updatedAt > first.updatedAt);
+});
+
+test('every write enqueues an outbox entry with store and id', async () => {
+  const f = await s.createFolder('A', null);
+  await s.renameFolder(f.id, 'B');
+  const e = await s.saveExam({ folderId: f.id, title: 'E', questions: questions() }, {});
+  const outbox = await s.getOutbox();
+  assert.deepEqual(outbox.map((o) => [o.store, o.id]), [['folders', f.id], ['folders', f.id], ['exams', e.id]]);
+  assert.ok(outbox[0].seq < outbox[1].seq);
+});
+
+test('clearOutbox removes entries up to a sequence number only', async () => {
+  await s.createFolder('A', null);
+  await s.createFolder('B', null);
+  const [first, second] = await s.getOutbox();
+  await s.clearOutbox(first.seq);
+  assert.deepEqual((await s.getOutbox()).map((o) => o.seq), [second.seq]);
+});
+
+test('deleteExam leaves a hidden tombstone and tombstones its attempts', async () => {
+  const f = await s.createFolder('F', null);
+  const e = await s.saveExam({ folderId: f.id, title: 'E', questions: questions(['b1']) }, { b1: new Blob(['x']) });
+  const a = await s.saveAttempt({ examId: e.id, answers: {}, score: 0, total: 1, startedAt: 1, finishedAt: 2 });
+  await s.deleteExam(e.id);
+  assert.equal(await s.getExam(e.id), undefined);
+  assert.equal((await s.listExams(f.id)).length, 0);
+  assert.equal((await s.listAllExams()).length, 0);
+  assert.equal((await s.listAttempts(e.id)).length, 0);
+  assert.equal(await s.getAttempt(a.id), undefined);
+  assert.equal((await s.getRecord('exams', e.id)).deleted, true);
+  assert.equal((await s.getRecord('attempts', a.id)).deleted, true);
+  assert.equal(await s.getBlob('b1'), undefined);
+  const outbox = await s.getOutbox();
+  assert.ok(outbox.some((o) => o.store === 'exams' && o.id === e.id));
+  assert.ok(outbox.some((o) => o.store === 'attempts' && o.id === a.id));
+});
+
+test('deleteFolder tombstones folder, subfolders and exams', async () => {
+  const a = await s.createFolder('A', null);
+  const sub = await s.createFolder('Sub', a.id);
+  const e = await s.saveExam({ folderId: sub.id, title: 'E', questions: questions() }, {});
+  await s.deleteFolder(a.id);
+  assert.deepEqual(await s.listFolders(), []);
+  for (const [store, id] of [['folders', a.id], ['folders', sub.id], ['exams', e.id]]) {
+    assert.equal((await s.getRecord(store, id)).deleted, true, `${store}/${id}`);
+  }
+});
+
+test('applyRemote stores a record without enqueueing it', async () => {
+  await s.applyRemote('folders', { id: 'r1', parentId: null, name: 'Remota', updatedAt: 5 });
+  assert.equal((await s.listFolders())[0].name, 'Remota');
+  assert.deepEqual(await s.getOutbox(), []);
+});
+
+test('meta values round trip', async () => {
+  assert.equal(await s.getMeta('cursor:exams'), undefined);
+  await s.setMeta('cursor:exams', 42);
+  assert.equal(await s.getMeta('cursor:exams'), 42);
+});
+
+test('importAll tombstones existing records missing from the backup so the deletion syncs', async () => {
+  const keep = await s.createFolder('Keep', null);
+  const gone = await s.createFolder('Gone', null);
+  const dump = { folders: [{ id: keep.id, parentId: null, name: 'Keep' }], exams: [], attempts: [], blobs: {} };
+  await s.importAll(dump);
+  assert.deepEqual((await s.listFolders()).map((f) => f.id), [keep.id]);
+  assert.equal((await s.getRecord('folders', gone.id)).deleted, true);
+});
+
+test('opening a v1 database migrates records to v2 keeping data and adding updatedAt', async () => {
+  s.closeDb();
+  const name = `legacy-${++n}`;
+  await new Promise((resolve, reject) => {
+    const req = indexedDB.open(name, 1);
+    req.onupgradeneeded = () => {
+      for (const st of ['folders', 'exams', 'blobs', 'attempts']) req.result.createObjectStore(st, { keyPath: 'id' });
+    };
+    req.onsuccess = () => {
+      const db = req.result;
+      const tx = db.transaction(['folders', 'exams', 'attempts'], 'readwrite');
+      tx.objectStore('folders').put({ id: 'f1', parentId: null, name: 'Antiga' });
+      tx.objectStore('exams').put({ id: 'e1', folderId: 'f1', title: 'T', createdAt: 1000, questions: questions() });
+      tx.objectStore('attempts').put({ id: 'a1', examId: 'e1', answers: {}, score: 1, total: 1, startedAt: 1, finishedAt: 2000 });
+      tx.oncomplete = () => { db.close(); resolve(); };
+      tx.onerror = () => reject(tx.error);
+    };
+    req.onerror = () => reject(req.error);
+  });
+  await s.openDb(name);
+  assert.equal((await s.listFolders())[0].name, 'Antiga');
+  assert.equal((await s.getRecord('exams', 'e1')).updatedAt, 1000);
+  assert.equal((await s.getRecord('attempts', 'a1')).updatedAt, 2000);
+  assert.ok((await s.getRecord('folders', 'f1')).updatedAt > 0);
+  assert.deepEqual(await s.getOutbox(), []);
+});
