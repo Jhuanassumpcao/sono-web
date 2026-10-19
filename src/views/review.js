@@ -3,44 +3,7 @@ import { validate } from '../validator.js';
 import { listFolders, saveExam } from '../storage.js';
 import { folderOptions } from '../dialogs.js';
 import { getDraft, setDraft } from './import.js';
-
-const keyAt = (i) => String.fromCharCode(65 + i);
-
-function relabel(q, keepAnswerIndex) {
-  q.options.forEach((o, i) => { o.key = keyAt(i); });
-  q.answer = keepAnswerIndex == null || keepAnswerIndex < 0 ? null : q.options[keepAnswerIndex]?.key ?? null;
-}
-
-function answerIndex(q) {
-  return q.answer ? q.options.findIndex((o) => o.key === q.answer) : -1;
-}
-
-function removeOption(q, idx) {
-  const a = answerIndex(q);
-  q.options.splice(idx, 1);
-  relabel(q, a === idx ? null : a > idx ? a - 1 : a);
-}
-
-function mergeWithPrevious(qs, i) {
-  const prev = qs[i - 1];
-  const cur = qs[i];
-  const a = answerIndex(prev);
-  prev.text = `${prev.text} ${cur.text}`.trim();
-  prev.options.push(...cur.options);
-  prev.images.push(...cur.images);
-  relabel(prev, a);
-  qs.splice(i, 1);
-}
-
-function splitAfterOption(qs, i, afterIdx) {
-  const q = qs[i];
-  const a = answerIndex(q);
-  const moved = q.options.splice(afterIdx + 1);
-  const next = { id: `q-new-${Date.now()}`, text: '', images: [], options: moved, answer: null };
-  relabel(next, a > afterIdx ? a - afterIdx - 1 : null);
-  relabel(q, a >= 0 && a <= afterIdx ? a : null);
-  qs.splice(i + 1, 0, next);
-}
+import { addOption, mergeWithPrevious, removeOption, splitAfterOption } from '../review-ops.js';
 
 export async function mount(container) {
   const draft = getDraft();
@@ -58,6 +21,7 @@ export async function mount(container) {
 
   const report = h('div');
   const saveBtn = h('button', { class: 'primary' }, 'Salvar simulado');
+  const saveError = h('div', { class: 'issue-error' });
   const confirmBox = h('input', { type: 'checkbox' });
   const confirmLabel = h('label', { class: 'row' }, confirmBox, 'Salvar mesmo com questões sem gabarito');
   const list = h('div');
@@ -115,7 +79,7 @@ export async function mount(container) {
           h('input', { type: 'text', value: o.text, oninput: (e) => { o.text = e.target.value; } }),
           h('button', { onclick: () => structural(() => removeOption(q, k)) }, '✕'))),
         h('div', { class: 'row' },
-          h('button', { onclick: () => structural(() => { const a = answerIndex(q); q.options.push({ key: '', text: '' }); relabel(q, a); }) }, '+ Alternativa'),
+          h('button', { onclick: () => structural(() => addOption(q)) }, '+ Alternativa'),
           h('label', { class: 'row' }, 'Gabarito:', answerSel)));
     }));
   }
@@ -125,7 +89,15 @@ export async function mount(container) {
     const questions = draft.questions.map((q, i) => ({ ...q, id: `q${i + 1}` }));
     const used = new Set(questions.flatMap((q) => q.images));
     const blobs = Object.fromEntries(Object.entries(draft.blobs).filter(([id]) => used.has(id)));
-    await saveExam({ folderId: folderSelect.value || null, title: titleInput.value.trim(), questions }, blobs);
+    try {
+      await saveExam({ folderId: folderSelect.value || null, title: titleInput.value.trim(), questions }, blobs);
+    } catch (e) {
+      console.error(e);
+      saveError.textContent = `Não foi possível salvar: ${e.message}. Se o armazenamento estiver cheio, exporte um backup e libere espaço.`;
+      updateReport();
+      return;
+    }
+    saveError.textContent = '';
     setDraft(null);
     location.hash = '#/';
   });
@@ -137,7 +109,7 @@ export async function mount(container) {
     h('p', { class: 'muted' }, 'Confira o que foi detectado e corrija o que precisar antes de salvar.'),
     h('div', { class: 'card row' }, h('label', {}, 'Título ', titleInput), h('label', {}, 'Pasta ', folderSelect)),
     report, list,
-    h('div', { class: 'card row spread' }, confirmLabel, saveBtn));
+    h('div', { class: 'card row spread' }, confirmLabel, saveBtn), saveError);
   renderQuestions();
   updateReport();
   return () => revokeAll(urls);

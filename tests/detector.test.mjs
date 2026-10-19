@@ -111,3 +111,42 @@ test('statement starting with a letter after a dot is not an option unless seque
   assert.equal(r.questions[0].options.length, 2);
   assert.match(r.questions[0].text, /C\. elegans/);
 });
+
+test('"Questão 1" heading without separator starts a question', () => {
+  const r = detect(L(['Questão 1', 'Quanto é 1+1?', 'A) 1', 'B) 2', 'QUESTÃO 02', 'Outra?', 'A) x', 'B) y']), []);
+  assert.equal(r.questions.length, 2);
+  assert.equal(r.questions[0].text, 'Quanto é 1+1?');
+});
+
+test('numbering may start at the first number in the answer key', () => {
+  const r = detect(L(['46. Pergunta?', 'A) x', 'B) y', '47. Outra?', 'A) x', 'B) y', 'Gabarito: 46-A 47-B']), []);
+  assert.equal(r.questions.length, 2);
+  assert.equal(r.questions[0].id, 'q46');
+  assert.equal(r.questions[1].answer, 'B');
+});
+
+test('thousands separator at line start is not a new question', () => {
+  const r = detect(L(['1. Uma empresa tinha', '2.500 funcionários em 2019.', 'A) x', 'B) y', '2. Segunda', 'A) x', 'B) y']), []);
+  assert.equal(r.questions.length, 2);
+  assert.match(r.questions[0].text, /2\.500 funcionários/);
+  assert.equal(r.questions[0].options.length, 2);
+});
+
+test('statement line starting with "resposta" does not cut the exam or become the key', () => {
+  const r = detect(L(['1. Pergunta', 'resposta correta sobre 2 e 3.', 'A) x', 'B) y', '2. Outra', 'A) x', 'B) y']), []);
+  assert.equal(r.questions.length, 2);
+  assert.equal(r.keyFound, false);
+  const r2 = detect(L(['Respostas devem ser marcadas a caneta.', '1. P', 'A) x', 'B) y']), []);
+  assert.equal(r2.questions.length, 1);
+});
+
+test('lowercase letters in plain words are not key letters', () => {
+  const r = detect(L([...basic, 'Gabarito', 'veja 1 e 2 acima']), []);
+  assert.equal(r.keyFound, false);
+});
+
+test('table-format answer key maps numbers row to letters row', () => {
+  const r = detect(L([...basic, 'Gabarito', '1 2', 'B A']), []);
+  assert.deepEqual(r.answerKey, { 1: 'B', 2: 'A' });
+  assert.equal(r.questions[1].answer, 'A');
+});

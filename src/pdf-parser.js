@@ -52,6 +52,19 @@ function imageToBlob(img) {
   return new Promise((resolve) => canvas.toBlob(resolve, 'image/png'));
 }
 
+const IMAGE_LOAD_TIMEOUT_MS = 3000;
+
+/** Imagens repetidas em várias páginas vivem em commonObjs (ids "g_..."); sem timeout o import travaria. */
+function loadImageObject(pdfPage, id) {
+  const store = id.startsWith('g_') ? pdfPage.commonObjs : pdfPage.objs;
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => resolve(null), IMAGE_LOAD_TIMEOUT_MS);
+    const done = (img) => { clearTimeout(timer); resolve(img); };
+    if (store.has(id)) done(store.get(id));
+    else store.get(id, done);
+  });
+}
+
 async function extractImages(pdfPage, lib, pageNumber, viewportHeight, blobs, images) {
   const ops = await pdfPage.getOperatorList();
   const { OPS } = lib;
@@ -68,11 +81,10 @@ async function extractImages(pdfPage, lib, pageNumber, viewportHeight, blobs, im
     if (fn === OPS.save) stack.push(ctm);
     else if (fn === OPS.restore) ctm = stack.pop() ?? ctm;
     else if (fn === OPS.transform) ctm = mul(ctm, args);
+    else if (fn === OPS.paintFormXObjectBegin) { stack.push(ctm); if (args?.[0]) ctm = mul(ctm, args[0]); }
+    else if (fn === OPS.paintFormXObjectEnd) ctm = stack.pop() ?? ctm;
     else if (fn === OPS.paintImageXObject || fn === OPS.paintJpegXObject) {
-      const img = await new Promise((resolve) => {
-        const get = (store) => (store.has(args[0]) ? resolve(store.get(args[0])) : false);
-        if (get(pdfPage.objs) === false) pdfPage.objs.get(args[0], resolve);
-      });
+      const img = await loadImageObject(pdfPage, args[0]);
       if (!img || img.width < MIN_IMAGE_SIZE || img.height < MIN_IMAGE_SIZE) continue;
       const blob = await imageToBlob(img);
       if (!blob) continue;
