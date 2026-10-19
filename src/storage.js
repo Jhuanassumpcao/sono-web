@@ -73,12 +73,21 @@ const uuid = () => crypto.randomUUID();
 const live = (r) => (r && !r.deleted ? r : undefined);
 const liveAll = async (name) => (await getAll(name)).filter((r) => !r.deleted);
 
+const listeners = new Set();
+/** Avisa quando algo é gravado localmente (usado para disparar a sincronização). Retorna a função de cancelar. */
+export function onChange(callback) {
+  listeners.add(callback);
+  return () => listeners.delete(callback);
+}
+const notify = () => { for (const cb of listeners) { try { cb(); } catch (e) { console.error(e); } } };
+
 /** Grava um registro sincronizável: carimba updatedAt (sempre crescente) e o coloca no outbox. */
 async function write(storeName, value) {
   const prev = await get(storeName, value.id);
   const record = { ...value, updatedAt: Math.max(Date.now(), (prev?.updatedAt ?? 0) + 1) };
   await put(storeName, record);
   await put('outbox', { store: storeName, id: record.id });
+  notify();
   return record;
 }
 
@@ -193,3 +202,37 @@ export const getRecord = (storeName, id) => get(storeName, id);
 export const applyRemote = (storeName, record) => put(storeName, record);
 export const getMeta = async (key) => (await get('meta', key))?.value;
 export const setMeta = (key, value) => put('meta', { key, value });
+
+// suporte à conta na nuvem (ver src/account-flow.js e src/blob-sync.js)
+export async function putBlobWithId(id, blob) {
+  await put('blobs', { id, data: blob });
+}
+
+/** Coloca todos os registros locais (inclusive exclusões) no outbox, sem alterar updatedAt. */
+export async function enqueueAll() {
+  for (const s of SYNCED) {
+    for (const r of await getAll(s)) await put('outbox', { store: s, id: r.id });
+  }
+  notify();
+}
+
+export async function countLive() {
+  return {
+    folders: (await liveAll('folders')).length,
+    exams: (await liveAll('exams')).length,
+    attempts: (await liveAll('attempts')).length,
+  };
+}
+
+/** Ids de imagem referenciados por simulados que não foram excluídos. */
+export async function listImageIds() {
+  const ids = new Set();
+  for (const e of await liveAll('exams')) for (const q of e.questions) for (const b of q.images ?? []) ids.add(b);
+  return [...ids];
+}
+
+/** Apaga tudo o que há no aparelho (usado ao trocar de conta). */
+export async function wipeLocal() {
+  for (const s of ['folders', 'exams', 'blobs', 'attempts', 'outbox', 'meta']) await clear(s);
+  notify();
+}

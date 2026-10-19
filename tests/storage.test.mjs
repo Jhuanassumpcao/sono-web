@@ -205,3 +205,61 @@ test('opening a v1 database migrates records to v2 keeping data and adding updat
   assert.ok((await s.getRecord('folders', 'f1')).updatedAt > 0);
   assert.deepEqual(await s.getOutbox(), []);
 });
+
+// ---- helpers para sincronização na nuvem ----
+
+test('onChange fires after each write and can be unsubscribed', async () => {
+  let calls = 0;
+  const off = s.onChange(() => { calls++; });
+  await s.createFolder('A', null);
+  assert.equal(calls, 1);
+  off();
+  await s.createFolder('B', null);
+  assert.equal(calls, 1);
+});
+
+test('putBlobWithId stores a blob under a given id', async () => {
+  await s.putBlobWithId('img-9', new Blob(['abc']));
+  assert.equal(await (await s.getBlob('img-9')).text(), 'abc');
+});
+
+test('enqueueAll queues every record, tombstones included, without changing updatedAt', async () => {
+  const a = await s.createFolder('A', null);
+  const b = await s.createFolder('B', null);
+  await s.deleteFolder(b.id);
+  const before = (await s.getRecord('folders', a.id)).updatedAt;
+  await s.clearOutbox(Infinity);
+  await s.enqueueAll();
+  const queued = (await s.getOutbox()).map((o) => o.id).sort();
+  assert.deepEqual(queued, [a.id, b.id].sort());
+  assert.equal((await s.getRecord('folders', a.id)).updatedAt, before);
+});
+
+test('countLive counts only non-deleted records', async () => {
+  const f = await s.createFolder('F', null);
+  const e = await s.saveExam({ folderId: f.id, title: 'E', questions: questions() }, {});
+  await s.saveAttempt({ examId: e.id, answers: {}, score: 0, total: 1, startedAt: 1, finishedAt: 2 });
+  assert.deepEqual(await s.countLive(), { folders: 1, exams: 1, attempts: 1 });
+  await s.deleteFolder(f.id);
+  assert.deepEqual(await s.countLive(), { folders: 0, exams: 0, attempts: 0 });
+});
+
+test('listImageIds returns images referenced by live exams only', async () => {
+  const f = await s.createFolder('F', null);
+  const keep = await s.saveExam({ folderId: f.id, title: 'K', questions: questions(['k1', 'k2']) }, { k1: new Blob(['1']), k2: new Blob(['2']) });
+  const gone = await s.saveExam({ folderId: f.id, title: 'G', questions: questions(['g1']) }, { g1: new Blob(['3']) });
+  await s.deleteExam(gone.id);
+  assert.deepEqual((await s.listImageIds()).sort(), ['k1', 'k2']);
+  assert.ok(keep.id);
+});
+
+test('wipeLocal clears records, blobs, outbox and meta', async () => {
+  const f = await s.createFolder('F', null);
+  await s.saveExam({ folderId: f.id, title: 'E', questions: questions(['b1']) }, { b1: new Blob(['x']) });
+  await s.setMeta('userId', 'u1');
+  await s.wipeLocal();
+  assert.deepEqual(await s.countLive(), { folders: 0, exams: 0, attempts: 0 });
+  assert.equal(await s.getBlob('b1'), undefined);
+  assert.deepEqual(await s.getOutbox(), []);
+  assert.equal(await s.getMeta('userId'), undefined);
+});
