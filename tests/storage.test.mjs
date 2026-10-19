@@ -90,3 +90,13 @@ test('exportAll then importAll restores state', async () => {
   assert.equal(await (await s.getBlob('b1')).text(), 'x');
   assert.equal((await s.listFolders()).length, 1);
 });
+
+test('listAllExams and listAllAttempts return everything regardless of folder', async () => {
+  const a = await s.createFolder('A', null);
+  const e1 = await s.saveExam({ folderId: a.id, title: 'E1', questions: questions() }, {});
+  const e2 = await s.saveExam({ folderId: null, title: 'E2', questions: questions() }, {});
+  await s.saveAttempt({ examId: e1.id, answers: {}, score: 0, total: 1, startedAt: 1, finishedAt: 2 });
+  await s.saveAttempt({ examId: e2.id, answers: {}, score: 1, total: 1, startedAt: 3, finishedAt: 4 });
+  assert.deepEqual((await s.listAllExams()).map((e) => e.title).sort(), ['E1', 'E2']);
+  assert.equal((await s.listAllAttempts()).length, 2);
+});

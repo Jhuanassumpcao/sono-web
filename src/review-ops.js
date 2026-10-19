@@ -42,7 +42,7 @@ export function splitAfterOption(qs, i, afterIdx) {
   const q = qs[i];
   const a = answerIndex(q);
   const moved = q.options.splice(afterIdx + 1);
-  const next = { id: `q-new-${Date.now()}`, text: '', images: [], options: moved, answer: null };
+  const next = { id: `q-new-${Date.now()}`, subtitle: '', text: '', images: [], options: moved, answer: null };
   relabel(next, a > afterIdx ? a - afterIdx - 1 : null);
   relabel(q, a >= 0 && a <= afterIdx ? a : null);
   qs.splice(i + 1, 0, next);

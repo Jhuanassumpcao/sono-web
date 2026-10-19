@@ -160,7 +160,8 @@ test('bare options "A texto" without separator are detected', () => {
   ]), []);
   assert.equal(r.questions.length, 2);
   assert.deepEqual(r.questions[0].options.map((o) => o.key), ['A', 'B', 'C', 'D', 'E']);
-  assert.equal(r.questions[0].text, 'Tema Qual a conduta?');
+  assert.equal(r.questions[0].subtitle, 'Tema');
+  assert.equal(r.questions[0].text, 'Qual a conduta?');
   assert.equal(r.questions[0].answer, 'B');
 });
 
@@ -200,4 +201,22 @@ test('cleanLines drops boilerplate repeated on 3+ pages but keeps options and qu
 test('cleanLines drops stray numeric codes but keeps answer-key number rows', () => {
   const out = cleanLines(L(['A Texto da opção', '4 0001903 91', 'Gabarito', '1 2 3', 'A B C'])).map((l) => l.text);
   assert.deepEqual(out, ['A Texto da opção', 'Gabarito', '1 2 3', 'A B C']);
+});
+
+test('text after "Questão N" is a subtitle when a statement follows', () => {
+  const r = detect(L(['Questão 1 Traumatismos Oculares', 'Assinale a incorreta.', 'A x', 'B y']), []);
+  assert.equal(r.questions[0].subtitle, 'Traumatismos Oculares');
+  assert.equal(r.questions[0].text, 'Assinale a incorreta.');
+});
+
+test('single-line "Questão N texto" without further statement keeps the text as statement', () => {
+  const r = detect(L(['Questão 1 Qual osso forma a fronte?', 'A Frontal', 'B Parietal']), []);
+  assert.equal(r.questions[0].subtitle, '');
+  assert.equal(r.questions[0].text, 'Qual osso forma a fronte?');
+});
+
+test('numbered "1. texto" keeps the first line as part of the statement and has empty subtitle', () => {
+  const r = detect(L(['1. Qual osso?', 'A) x', 'B) y']), []);
+  assert.equal(r.questions[0].subtitle, '');
+  assert.equal(r.questions[0].text, 'Qual osso?');
 });

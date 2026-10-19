@@ -1,3 +1,5 @@
+import { filterDecorative } from './image-filter.js';
+
 const PDFJS_VERSION = '3.11.174';
 const LINE_TOLERANCE = 5;
 const MIN_TEXT_CHARS = 20;
@@ -65,7 +67,8 @@ function loadImageObject(pdfPage, id) {
   });
 }
 
-async function extractImages(pdfPage, lib, pageNumber, viewportHeight, blobs, images) {
+/** Coleta metadados das imagens (sem decodificar): args do operador são [objId, largura, altura]. */
+async function collectImages(pdfPage, lib, pageNumber, viewport, images) {
   const ops = await pdfPage.getOperatorList();
   const { OPS } = lib;
   const stack = [];
@@ -84,16 +87,31 @@ async function extractImages(pdfPage, lib, pageNumber, viewportHeight, blobs, im
     else if (fn === OPS.paintFormXObjectBegin) { stack.push(ctm); if (args?.[0]) ctm = mul(ctm, args[0]); }
     else if (fn === OPS.paintFormXObjectEnd) ctm = stack.pop() ?? ctm;
     else if (fn === OPS.paintImageXObject || fn === OPS.paintJpegXObject) {
-      const img = await loadImageObject(pdfPage, args[0]);
-      if (!img || img.width < MIN_IMAGE_SIZE || img.height < MIN_IMAGE_SIZE) continue;
-      const blob = await imageToBlob(img);
-      if (!blob) continue;
-      const blobId = crypto.randomUUID();
-      blobs[blobId] = blob;
+      const [objId, width, height] = args;
+      if (width < MIN_IMAGE_SIZE || height < MIN_IMAGE_SIZE) continue;
       // a matriz mapeia o quadrado unitário; o topo da imagem é ctm[5] + ctm[3]
-      images.push({ blobId, page: pageNumber, y: viewportHeight - (ctm[5] + ctm[3]) });
+      images.push({
+        blobId: crypto.randomUUID(), objId, page: pageNumber, y: viewport.height - (ctm[5] + ctm[3]),
+        width, height,
+        drawnW: Math.hypot(ctm[0], ctm[1]), drawnH: Math.hypot(ctm[2], ctm[3]),
+        pageW: viewport.width, pageH: viewport.height,
+      });
     }
   }
+}
+
+/** Converte para PNG só as imagens que sobraram do filtro; as que falharem são removidas da lista. */
+async function convertImages(pdf, kept, blobs) {
+  const result = [];
+  for (const im of kept) {
+    const page = await pdf.getPage(im.page);
+    const obj = await loadImageObject(page, im.objId);
+    const blob = obj ? await imageToBlob(obj) : null;
+    if (!blob) continue;
+    blobs[im.blobId] = blob;
+    result.push(im);
+  }
+  return result;
 }
 
 /** @param {File} file */
@@ -101,7 +119,7 @@ export async function parsePdf(file) {
   const lib = configure();
   const pdf = await lib.getDocument({ data: await file.arrayBuffer() }).promise;
   const lines = [];
-  const images = [];
+  const candidates = [];
   const blobs = {};
   for (let p = 1; p <= pdf.numPages; p++) {
     const page = await pdf.getPage(p);
@@ -109,11 +127,13 @@ export async function parsePdf(file) {
     const content = await page.getTextContent();
     lines.push(...toLines(content.items, viewport.height, p));
     try {
-      await extractImages(page, lib, p, viewport.height, blobs, images);
+      await collectImages(page, lib, p, viewport, candidates);
     } catch (e) {
-      console.warn(`Imagens da página ${p} não puderam ser extraídas`, e);
+      console.warn(`Imagens da página ${p} não puderam ser lidas`, e);
     }
   }
+  const { kept } = filterDecorative(candidates, pdf.numPages);
+  const images = await convertImages(pdf, kept, blobs);
   images.sort((a, b) => a.page - b.page || a.y - b.y);
   const hasText = lines.reduce((n, l) => n + l.text.length, 0) >= MIN_TEXT_CHARS;
   return { lines, images, blobs, hasText };

@@ -140,3 +140,6 @@ export async function importAll({ folders, exams, attempts, blobs }) {
   for (const a of attempts) await put('attempts', a);
   for (const [id, data] of Object.entries(blobs)) await put('blobs', { id, data });
 }
+
+export const listAllExams = () => getAll('exams');
+export const listAllAttempts = () => getAll('attempts');

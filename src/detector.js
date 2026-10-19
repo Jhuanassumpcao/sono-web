@@ -112,7 +112,10 @@ export function detect(rawLines, images) {
     const q = line.text.match(QUESTION_START);
     const expected = blocks.length ? blocks[blocks.length - 1].number + 1 : firstNumber;
     if (q && Number(q[1] ?? q[2]) === expected) {
-      blocks.push({ number: expected, pos: { page: line.page, y: line.y }, head: q[3]?.trim() ?? '', body: [] });
+      blocks.push({
+        number: expected, pos: { page: line.page, y: line.y }, head: q[3]?.trim() ?? '',
+        headIsTag: q[1] !== undefined, body: [],
+      });
     } else if (blocks.length) {
       blocks[blocks.length - 1].body.push(line.text);
     }
@@ -120,9 +123,12 @@ export function detect(rawLines, images) {
 
   const questions = blocks.map((b) => {
     const { statement, options } = splitBody(b.body);
+    // "Questão 1 Tema" costuma ser só uma etiqueta; se não há enunciado depois, a linha é o enunciado
+    const isSubtitle = b.headIsTag && b.head && statement.length > 0;
     return {
       id: `q${b.number}`,
-      text: [b.head, ...statement].filter(Boolean).join(' '),
+      subtitle: isSubtitle ? b.head : '',
+      text: (isSubtitle ? statement : [b.head, ...statement]).filter(Boolean).join(' '),
       images: [],
       options: options.map((o) => ({ key: o.key, text: o.text.join(' ') })),
       answer: answerKey[b.number] ?? null,
