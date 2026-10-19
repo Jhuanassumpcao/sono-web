@@ -263,3 +263,17 @@ test('wipeLocal clears records, blobs, outbox and meta', async () => {
   assert.deepEqual(await s.getOutbox(), []);
   assert.equal(await s.getMeta('userId'), undefined);
 });
+
+test('images inside options count as exam images (listing and deletion)', async () => {
+  const f = await s.createFolder('F', null);
+  const qs = [{
+    id: 'q1', text: 'T', images: ['stmt'], answer: 'A',
+    options: [{ key: 'A', text: '', image: 'oa' }, { key: 'B', text: '', image: 'ob' }],
+  }];
+  const e = await s.saveExam({ folderId: f.id, title: 'E', questions: qs }, {
+    stmt: new Blob(['s']), oa: new Blob(['a']), ob: new Blob(['b']),
+  });
+  assert.deepEqual((await s.listImageIds()).sort(), ['oa', 'ob', 'stmt']);
+  await s.deleteExam(e.id);
+  for (const id of ['stmt', 'oa', 'ob']) assert.equal(await s.getBlob(id), undefined, id);
+});

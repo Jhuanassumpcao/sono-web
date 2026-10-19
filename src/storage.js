@@ -70,6 +70,9 @@ const del = (name, id) => wrap(store(name, 'readwrite').delete(id));
 const clear = (name) => wrap(store(name, 'readwrite').clear());
 const uuid = () => crypto.randomUUID();
 
+/** Ids de todas as imagens de uma questão: do enunciado e de dentro das alternativas. */
+export const imagesOfQuestion = (q) => [...(q.images ?? []), ...(q.options ?? []).map((o) => o.image).filter(Boolean)];
+
 const live = (r) => (r && !r.deleted ? r : undefined);
 const liveAll = async (name) => (await getAll(name)).filter((r) => !r.deleted);
 
@@ -136,7 +139,7 @@ export async function moveExam(id, folderId) {
 export async function deleteExam(id) {
   const exam = live(await get('exams', id));
   if (!exam) return;
-  for (const q of exam.questions) for (const b of q.images) await del('blobs', b);
+  for (const q of exam.questions) for (const b of imagesOfQuestion(q)) await del('blobs', b);
   for (const a of await listAttempts(id)) await write('attempts', { ...a, deleted: true });
   await write('exams', { ...exam, deleted: true, questions: [] });
 }
@@ -227,7 +230,7 @@ export async function countLive() {
 /** Ids de imagem referenciados por simulados que não foram excluídos. */
 export async function listImageIds() {
   const ids = new Set();
-  for (const e of await liveAll('exams')) for (const q of e.questions) for (const b of q.images ?? []) ids.add(b);
+  for (const e of await liveAll('exams')) for (const q of e.questions) for (const b of imagesOfQuestion(q)) ids.add(b);
   return [...ids];
 }
 

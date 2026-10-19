@@ -17,6 +17,9 @@ export function validate(questions, keyFound) {
       fewOptions++;
       issues.push(issue(q.id, 'error', 'FEW_OPTIONS', `${q.id}: menos de 2 alternativas.`));
     }
+    if (q.optionsInImage) {
+      issues.push(issue(q.id, 'warning', 'OPTIONS_IN_IMAGE', `${q.id}: as alternativas parecem estar em uma imagem; confira a quantidade de letras.`));
+    }
     const keys = q.options.map((o) => o.key);
     if (new Set(keys).size !== keys.length) {
       issues.push(issue(q.id, 'error', 'DUPLICATE_KEY', `${q.id}: letras de alternativa repetidas.`));

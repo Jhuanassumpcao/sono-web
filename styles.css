@@ -162,3 +162,5 @@ a.tile-link:hover .card, .card.clickable:hover { border-color: var(--accent); }
 /* diálogos */
 dialog { border: 1px solid var(--line); border-radius: 16px; background: var(--surface); color: var(--fg); max-width: 440px; width: calc(100% - 32px); box-shadow: var(--shadow); padding: 20px; }
 dialog::backdrop { background: rgba(8, 12, 24, .55); }
+.opt-body { flex: 1; min-width: 0; }
+.opt-body img { max-width: 100%; border-radius: 8px; margin-top: 6px; display: block; background: #fff; border: 1px solid var(--line); }

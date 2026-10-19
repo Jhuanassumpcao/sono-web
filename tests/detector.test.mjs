@@ -220,3 +220,68 @@ test('numbered "1. texto" keeps the first line as part of the statement and has 
   assert.equal(r.questions[0].subtitle, '');
   assert.equal(r.questions[0].text, 'Qual osso?');
 });
+
+// ---- alternativas em imagem, ligaduras e espaçamento (PDF "Distúrbios do Potássio") ----
+
+const at = (text, y, page = 1) => ({ text, page, y });
+
+test('lone letters A..D with images beside them become options with an image each', () => {
+  const lines = [
+    at('Questão 1 Tema', 10), at('Qual o ECG?', 30),
+    at('A', 100), at('B', 190), at('C', 280), at('D', 370),
+    at('Questão 2 Outro', 500), at('Pergunta?', 520), at('A Sim', 540), at('B Não', 560),
+  ];
+  const images = [
+    { blobId: 'ia', page: 1, y: 85, drawnH: 60 },
+    { blobId: 'ib', page: 1, y: 175, drawnH: 60 },
+    { blobId: 'ic', page: 1, y: 265, drawnH: 60 },
+    { blobId: 'id', page: 1, y: 355, drawnH: 60 },
+  ];
+  const r = detect(lines, images);
+  assert.deepEqual(r.questions[0].options.map((o) => [o.key, o.text, o.image]), [
+    ['A', '', 'ia'], ['B', '', 'ib'], ['C', '', 'ic'], ['D', '', 'id'],
+  ]);
+  assert.deepEqual(r.questions[0].images, []);
+  assert.equal(r.questions[1].options.length, 2);
+});
+
+test('a statement image above the lone letters stays with the question', () => {
+  const lines = [at('Questão 1 Tema', 10), at('Veja o ECG.', 30), at('A', 200), at('B', 290)];
+  const images = [
+    { blobId: 'stmt', page: 1, y: 40, drawnH: 100 },
+    { blobId: 'ia', page: 1, y: 185, drawnH: 60 },
+    { blobId: 'ib', page: 1, y: 275, drawnH: 60 },
+  ];
+  const q = detect(lines, images).questions[0];
+  assert.deepEqual(q.images, ['stmt']);
+  assert.deepEqual(q.options.map((o) => o.image), ['ia', 'ib']);
+});
+
+test('a question with images but no text options gets empty options flagged as in-image', () => {
+  const lines = [];
+  for (let n = 1; n <= 3; n++) {
+    lines.push(at(`Questão ${n} Tema`, n * 100), at('Pergunta?', n * 100 + 10), at('A a', n * 100 + 20), at('B b', n * 100 + 30), at('C c', n * 100 + 40), at('D d', n * 100 + 50));
+  }
+  lines.push(at('Questão 4 Tema', 400), at('Qual a conduta?', 410));
+  const r = detect(lines, [{ blobId: 'fig', page: 1, y: 415, drawnH: 50 }]);
+  const q4 = r.questions[3];
+  assert.equal(q4.optionsInImage, true);
+  assert.deepEqual(q4.options.map((o) => o.key), ['A', 'B', 'C', 'D']);
+  assert.ok(q4.options.every((o) => o.text === ''));
+  assert.equal(r.questions[0].optionsInImage, undefined);
+});
+
+test('a question with no options and no images is left without options', () => {
+  const r = detect(L(['Questão 1 Tema', 'Pergunta sem alternativas?']), []);
+  assert.equal(r.questions[0].options.length, 0);
+  assert.equal(r.questions[0].optionsInImage, undefined);
+});
+
+test('cleanLines repairs a 9 ligature inside words, and at word start only when the document proves it', () => {
+  const proven = cleanLines(L(['su9ciente', 'gra9co e a9m', 'ca9a', 'conteúdo 9siológico e 9caram', 'leucócitos 9mil/mm']));
+  assert.equal(proven[0].text, 'suficiente');
+  assert.equal(proven[3].text, 'conteúdo fisiológico e ficaram');
+  assert.equal(proven[4].text, 'leucócitos 9mil/mm');
+  const notProven = cleanLines(L(['paciente com 9siológico']));
+  assert.equal(notProven[0].text, 'paciente com 9siológico');
+});

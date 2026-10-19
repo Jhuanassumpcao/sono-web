@@ -1,7 +1,7 @@
 import { h, revokeAll } from '../dom.js';
 import { icon } from '../icons.js';
 import { validate } from '../validator.js';
-import { listFolders, saveExam } from '../storage.js';
+import { listFolders, saveExam, imagesOfQuestion } from '../storage.js';
 import { folderOptions } from '../dialogs.js';
 import { getDraft, setDraft } from './import.js';
 import { addOption, mergeWithPrevious, removeOption, splitAfterOption } from '../review-ops.js';
@@ -104,7 +104,9 @@ export async function mount(container) {
             qs.map((_, k) => (k === i ? null : h('option', { value: k }, `Questão ${k + 1}`)))) : null))),
         h('div', { style: 'margin-top:8px' }, q.options.map((o, k) => h('div', { class: 'opt-row' },
           h('span', { class: 'key' }, o.key),
-          h('input', { type: 'text', value: o.text, oninput: (e) => { o.text = e.target.value; } }),
+          h('input', { type: 'text', value: o.text, placeholder: o.image ? '(alternativa em imagem)' : '', oninput: (e) => { o.text = e.target.value; } }),
+          o.image ? h('div', { class: 'thumb' }, h('img', { src: imgUrl(o.image), alt: '' }),
+            h('button', { class: 'ghost danger', onclick: () => structural(() => { delete o.image; }) }, 'Remover imagem')) : null,
           h('button', { class: 'icon-btn', title: 'Remover alternativa', onclick: () => structural(() => removeOption(q, k)) }, icon('x', 16))))),
         h('div', { class: 'row', style: 'margin-top:8px' },
           h('button', { onclick: () => structural(() => addOption(q)) }, icon('plus', 16), 'Alternativa'),
@@ -115,7 +117,7 @@ export async function mount(container) {
   saveBtn.addEventListener('click', async () => {
     saveBtn.disabled = true;
     const questions = draft.questions.map((q, i) => ({ ...q, id: `q${i + 1}` }));
-    const used = new Set(questions.flatMap((q) => q.images));
+    const used = new Set(questions.flatMap(imagesOfQuestion));
     const blobs = Object.fromEntries(Object.entries(draft.blobs).filter(([id]) => used.has(id)));
     const folderId = folderSelect.value || null;
     try {

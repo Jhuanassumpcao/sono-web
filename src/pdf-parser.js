@@ -1,4 +1,5 @@
 import { filterDecorative } from './image-filter.js';
+import { joinItems } from './text-join.js';
 
 const PDFJS_VERSION = '3.11.174';
 const LINE_TOLERANCE = 5;
@@ -20,12 +21,12 @@ function toLines(items, viewportHeight, page) {
     const x = it.transform[4];
     let row = rows.find((r) => Math.abs(r.y - y) <= LINE_TOLERANCE);
     if (!row) { row = { y, parts: [] }; rows.push(row); }
-    row.parts.push({ x, str: it.str });
+    row.parts.push({ x, str: it.str, width: it.width, size: Math.hypot(it.transform[0], it.transform[1]) || it.height });
   }
   return rows
     .sort((a, b) => a.y - b.y)
     .map((r) => ({
-      text: r.parts.sort((a, b) => a.x - b.x).map((p) => p.str).join(' ').replace(/\s+/g, ' ').trim(),
+      text: joinItems(r.parts),
       page,
       y: r.y,
     }))

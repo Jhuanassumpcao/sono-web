@@ -30,6 +30,7 @@ export async function mount(container, [examId], query) {
     revokeAll(urls);
     const q = questions[index];
     const images = await imageElements(q.images, urls);
+    const optionImages = await Promise.all(q.options.map((o) => (o.image ? imageElements([o.image], urls) : [])));
     const answered = Object.keys(answers).length;
     const pct = Math.round((answered / questions.length) * 100);
 
@@ -52,10 +53,11 @@ export async function mount(container, [examId], query) {
         q.subtitle ? h('div', { class: 'qtag' }, h('span', { class: 'chip' }, q.subtitle)) : null,
         h('div', { class: 'qtext' }, q.text),
         images,
-        q.options.map((o) => h('button', {
+        q.options.map((o, k) => h('button', {
           class: `option${answers[q.id] === o.key ? ' selected' : ''}`,
           onclick: () => { answers[q.id] = o.key; render(); },
-        }, h('span', { class: 'key' }, o.key), h('span', {}, o.text)))));
+        }, h('span', { class: 'key' }, o.key),
+        h('span', { class: 'opt-body' }, o.text || (o.image ? null : h('span', { class: 'muted' }, 'Veja a imagem da questão')), optionImages[k])))));
 
     bar.replaceChildren(h('div', { class: 'actionbar-inner' },
       h('div', { class: 'row' },

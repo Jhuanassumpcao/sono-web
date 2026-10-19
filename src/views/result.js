@@ -33,15 +33,17 @@ export async function mount(container, [attemptId]) {
       if (filter === 'wrong' && p.correct) continue;
       if (filter === 'blank' && p.chosen !== null) continue;
       const images = await imageElements(q.images, urls);
+      const optionImages = await Promise.all(q.options.map((o) => (o.image ? imageElements([o.image], urls) : [])));
       cards.push(h('div', { class: `card qcard result-card ${status}` },
         h('div', { class: 'row spread qtag' },
           h('div', { class: 'row' }, h('strong', {}, `Questão ${i + 1}`), q.subtitle ? h('span', { class: 'chip' }, q.subtitle) : null),
           h('span', { class: `chip ${status === 'blank' ? 'warn' : status}` }, p.correct ? 'Certa' : p.chosen ? 'Errada' : 'Sem resposta')),
         h('div', { class: 'qtext' }, q.text),
         images,
-        q.options.map((o) => h('div', {
+        q.options.map((o, k) => h('div', {
           class: `option static${o.key === q.answer ? ' correct' : o.key === p.chosen ? ' wrong' : ''}`,
-        }, h('span', { class: 'key' }, o.key), h('span', {}, o.text))),
+        }, h('span', { class: 'key' }, o.key),
+        h('span', { class: 'opt-body' }, o.text || (o.image ? null : h('span', { class: 'muted' }, 'Veja a imagem da questão')), optionImages[k]))),
         h('div', { class: 'muted' }, `Sua resposta: ${p.chosen ?? '—'} · Gabarito: ${q.answer ?? 'não informado'}`)));
     }
     const tab = (key, label) => h('button', { class: filter === key ? 'active' : '', onclick: () => { filter = key; render(); } }, label);

@@ -44,20 +44,42 @@ function findKeyStart(lines) {
 
 const before = (a, b) => a.page < b.page || (a.page === b.page && a.y <= b.y);
 
+// letra sozinha na linha ("A"): alternativa cujo conteúdo é uma imagem ao lado
+const OPTION_LONE = /^\s*\(?([A-E])\)?\s*$/;
+// caracteres que algumas fontes extraem no lugar da ligadura "fi"
+const LIGATURE_CHARS = '39<';
+const LIGATURE_EVIDENCE = 3;
+const UNIT_AFTER_DIGIT = /^(mil|mcg|mg|ml|meq|mmol|mm|cm|kg|ui|bpm|irpm|min|seg)\b/i;
+const OPTION_IMAGE_MAX_DISTANCE = 70;
+const DEFAULT_OPTION_COUNT = 4;
+
 function matchOption(text) {
   const m = text.match(OPTION_PUNCT) ?? text.match(OPTION_BARE);
-  return m ? { key: m[1].toUpperCase(), text: m[2].trim() } : null;
+  if (m) return { key: m[1].toUpperCase(), text: m[2].trim() };
+  const lone = text.match(OPTION_LONE);
+  return lone ? { key: lone[1], text: '', lone: true } : null;
 }
 
-/** Corrige "fi" extraído como "3" ou "<", junta palavras hifenizadas e remove rodapés repetidos. */
+/**
+ * Corrige "fi" extraído como "3", "9" ou "<": dentro de palavras sempre; no início da palavra só se o
+ * documento provar que aquele caractere é a ligadura (3+ ocorrências dentro de palavras).
+ */
+function repairLigatures(texts) {
+  const inWord = /([a-zà-ú])([39<])(?=[a-zà-ú])/g;
+  const evidence = {};
+  for (const t of texts) for (const m of t.matchAll(inWord)) evidence[m[2]] = (evidence[m[2]] ?? 0) + 1;
+  const proven = new Set(Object.keys(evidence).filter((c) => evidence[c] >= LIGATURE_EVIDENCE));
+  return texts.map((t) => t
+    .replace(inWord, '$1fi')
+    .replace(/(^|[\s(])([39<])([a-zà-ú]{2,})/g, (m, pre, ch, rest) => (
+      proven.has(ch) && !UNIT_AFTER_DIGIT.test(rest) ? `${pre}fi${rest}` : m))
+    .replace(/([a-zà-ú])- (?=[a-zà-ú])/g, '$1'));
+}
+
+/** Corrige ligaduras, junta palavras hifenizadas e remove rodapés e códigos repetidos. */
 export function cleanLines(lines) {
-  const fixed = lines.map((l) => ({
-    ...l,
-    text: l.text
-      .replace(/([a-zà-ú])3(?=[a-zà-ú])/g, '$1fi')
-      .replace(/([a-zà-ú])<(?=[a-zà-ú])/g, '$1fi')
-      .replace(/([a-zà-ú])- (?=[a-zà-ú])/g, '$1'),
-  }));
+  const repaired = repairLigatures(lines.map((l) => l.text));
+  const fixed = lines.map((l, i) => ({ ...l, text: repaired[i] }));
   const pagesByShape = new Map();
   const shape = (t) => t.replace(/[\s\d]/g, '');
   for (const l of fixed) {
@@ -77,27 +99,61 @@ export function cleanLines(lines) {
 /**
  * Separa o corpo de uma questão em enunciado e alternativas. O início das alternativas é a última
  * linha "A ..." que tem uma "B ..." depois dela, para que "A paciente refere..." no enunciado não conte.
+ * @param {{text: string, page: number, y: number}[]} body
  */
 function splitBody(body) {
   let start = -1;
-  body.forEach((text, i) => {
-    if (matchOption(text)?.key === 'A' && body.slice(i + 1).some((t) => matchOption(t)?.key === 'B')) start = i;
+  body.forEach((line, i) => {
+    if (matchOption(line.text)?.key === 'A' && body.slice(i + 1).some((l) => matchOption(l.text)?.key === 'B')) start = i;
   });
-  const statement = (start < 0 ? body : body.slice(0, start)).map((t) => t.trim()).filter(Boolean);
+  const statement = (start < 0 ? body : body.slice(0, start)).map((l) => l.text.trim()).filter(Boolean);
   const options = [];
   if (start >= 0) {
-    for (const text of body.slice(start)) {
-      const o = matchOption(text);
-      if (o && o.key === String.fromCharCode(65 + options.length)) options.push({ key: o.key, text: [o.text] });
-      else if (text.trim()) options[options.length - 1].text.push(text.trim());
+    for (const line of body.slice(start)) {
+      const o = matchOption(line.text);
+      if (o && o.key === String.fromCharCode(65 + options.length)) {
+        options.push({ key: o.key, text: o.text ? [o.text] : [], lone: Boolean(o.lone), page: line.page, y: line.y });
+      } else if (line.text.trim()) {
+        options[options.length - 1].text.push(line.text.trim());
+      }
     }
   }
   return { statement, options };
 }
 
+/** Liga cada imagem à alternativa de letra solta mais próxima (mesma página); as demais ficam com a questão. */
+function assignOptionImages(question, options, images) {
+  const lone = options.filter((o) => o.lone && o.text.length === 0);
+  if (lone.length < 2) return;
+  const rest = [];
+  for (const img of images) {
+    const center = img.y + (img.drawnH ?? 0) / 2;
+    let best = null;
+    for (const o of lone) {
+      if (o.page !== img.page) continue;
+      const d = Math.abs(center - o.y);
+      if (d <= OPTION_IMAGE_MAX_DISTANCE && (!best || d < best.d)) best = { o, d };
+    }
+    const target = best && question.options.find((qo) => qo.key === best.o.key);
+    if (target && !target.image) target.image = img.blobId;
+    else rest.push(img);
+  }
+  question.images = rest.map((i) => i.blobId);
+}
+
+/** Número de alternativas mais comum no documento (empate: o maior); serve para questões com alternativas só em figura. */
+function modalOptionCount(questions) {
+  const counts = new Map();
+  for (const q of questions) if (q.options.length >= 2) counts.set(q.options.length, (counts.get(q.options.length) ?? 0) + 1);
+  let best = DEFAULT_OPTION_COUNT;
+  let bestN = 0;
+  for (const [len, n] of counts) if (n > bestN || (n === bestN && len > best)) { best = len; bestN = n; }
+  return best;
+}
+
 /**
  * @param {{text: string, page: number, y: number}[]} rawLines
- * @param {{blobId: string, page: number, y: number}[]} images
+ * @param {{blobId: string, page: number, y: number, drawnH?: number}[]} images
  */
 export function detect(rawLines, images) {
   const lines = cleanLines(rawLines);
@@ -117,28 +173,40 @@ export function detect(rawLines, images) {
         headIsTag: q[1] !== undefined, body: [],
       });
     } else if (blocks.length) {
-      blocks[blocks.length - 1].body.push(line.text);
+      blocks[blocks.length - 1].body.push(line);
     }
   }
 
-  const questions = blocks.map((b) => {
-    const { statement, options } = splitBody(b.body);
-    // "Questão 1 Tema" costuma ser só uma etiqueta; se não há enunciado depois, a linha é o enunciado
-    const isSubtitle = b.headIsTag && b.head && statement.length > 0;
-    return {
-      id: `q${b.number}`,
-      subtitle: isSubtitle ? b.head : '',
-      text: (isSubtitle ? statement : [b.head, ...statement]).filter(Boolean).join(' '),
-      images: [],
-      options: options.map((o) => ({ key: o.key, text: o.text.join(' ') })),
-      answer: answerKey[b.number] ?? null,
-    };
-  });
-
+  const imagesOf = blocks.map(() => []);
   for (const img of images) {
     let target = 0;
     blocks.forEach((b, i) => { if (before(b.pos, img)) target = i; });
-    if (questions[target]) questions[target].images.push(img.blobId);
+    if (imagesOf[target]) imagesOf[target].push(img);
+  }
+
+  const questions = blocks.map((b, i) => {
+    const { statement, options } = splitBody(b.body);
+    // "Questão 1 Tema" costuma ser só uma etiqueta; se não há enunciado depois, a linha é o enunciado
+    const isSubtitle = b.headIsTag && b.head && statement.length > 0;
+    const question = {
+      id: `q${b.number}`,
+      subtitle: isSubtitle ? b.head : '',
+      text: (isSubtitle ? statement : [b.head, ...statement]).filter(Boolean).join(' '),
+      images: imagesOf[i].map((img) => img.blobId),
+      options: options.map((o) => ({ key: o.key, text: o.text.join(' ') })),
+      answer: answerKey[b.number] ?? null,
+    };
+    assignOptionImages(question, options, imagesOf[i]);
+    return question;
+  });
+
+  const modal = modalOptionCount(questions);
+  for (const q of questions) {
+    if (q.options.length > 0 || q.images.length === 0) continue;
+    const answerIdx = q.answer ? q.answer.charCodeAt(0) - 65 + 1 : 0;
+    const count = Math.max(modal, answerIdx);
+    q.options = Array.from({ length: count }, (_, k) => ({ key: String.fromCharCode(65 + k), text: '' }));
+    q.optionsInImage = true;
   }
 
   return { questions, answerKey, keyFound };

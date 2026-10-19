@@ -65,3 +65,15 @@ test('issues carry questionId', () => {
   const r = validate([q({ id: 'q7', answer: null })], false);
   assert.equal(r.issues[0].questionId, 'q7');
 });
+
+test('options in image: empty option texts are fine and raise only a warning', () => {
+  const r = validate([q({ options: [{ key: 'A', text: '' }, { key: 'B', text: '' }, { key: 'C', text: '' }], optionsInImage: true })], true);
+  assert.deepEqual(codes(r), ['OPTIONS_IN_IMAGE']);
+  assert.equal(r.issues[0].level, 'warning');
+  assert.equal(r.ok, true);
+});
+
+test('options that carry an image need no text', () => {
+  const r = validate([q({ options: [{ key: 'A', text: '', image: 'i1' }, { key: 'B', text: '', image: 'i2' }] })], true);
+  assert.deepEqual(r.issues, []);
+});
