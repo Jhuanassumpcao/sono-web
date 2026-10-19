@@ -1,0 +1,12 @@
+{
+  "name": "simulados",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test tests/"
+  },
+  "devDependencies": {
+    "fake-indexeddb": "^6.2.6",
+    "jszip": "^3.10.2"
+  }
+}
