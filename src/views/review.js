@@ -25,7 +25,14 @@ export async function mount(container) {
   const saveError = h('div', { class: 'issue-error' });
   const confirmBox = h('input', { type: 'checkbox' });
   const confirmLabel = h('label', { class: 'row' }, confirmBox, 'Salvar mesmo com questões sem gabarito');
+  const revealAllBtn = h('button', { onclick: () => {
+    revealAll = !revealAll;
+    revealAllBtn.replaceChildren(icon(revealAll ? 'eyeoff' : 'eye', 16), revealAll ? 'Ocultar todos os gabaritos' : 'Mostrar todos os gabaritos');
+    renderQuestions();
+  } }, icon('eye', 16), 'Mostrar todos os gabaritos');
   const list = h('div');
+  const revealed = new Set(); // questões cujo gabarito o usuário escolheu mostrar
+  let revealAll = false;
   const titleInput = h('input', { type: 'text', value: draft.title });
   const folderSelect = h('select', {}, h('option', { value: '' }, '(raiz)'),
     folderOptions(folders).map((o) => h('option', { value: o.id, selected: o.id === draft.folderId }, o.label)));
@@ -50,6 +57,18 @@ export async function mount(container) {
     fn();
     renderQuestions();
     updateReport();
+  }
+
+  function answerBlock(q, answerSel) {
+    const shown = revealAll || revealed.has(q);
+    if (shown) {
+      return h('div', { class: 'row' },
+        h('label', { class: 'row' }, 'Gabarito:', answerSel),
+        revealAll ? null : h('button', { class: 'ghost', onclick: () => { revealed.delete(q); renderQuestions(); } }, icon('eyeoff', 16), 'Ocultar'));
+    }
+    return h('div', { class: 'row' },
+      h('span', { class: `chip ${q.answer ? 'ok' : 'warn'}` }, q.answer ? 'Gabarito definido' : 'Sem gabarito'),
+      h('button', { class: 'ghost', onclick: () => { revealed.add(q); renderQuestions(); } }, icon('eye', 16), 'Mostrar e revisar gabarito'));
   }
 
   function renderQuestions() {
@@ -89,7 +108,7 @@ export async function mount(container) {
           h('button', { class: 'icon-btn', title: 'Remover alternativa', onclick: () => structural(() => removeOption(q, k)) }, icon('x', 16))))),
         h('div', { class: 'row', style: 'margin-top:8px' },
           h('button', { onclick: () => structural(() => addOption(q)) }, icon('plus', 16), 'Alternativa'),
-          h('label', { class: 'row' }, 'Gabarito:', answerSel)));
+          answerBlock(q, answerSel)));
     }));
   }
 
@@ -120,6 +139,9 @@ export async function mount(container) {
     h('div', { class: 'card' }, h('div', { class: 'row' },
       h('label', { class: 'field', style: 'flex:2;min-width:220px' }, 'Título', titleInput),
       h('label', { class: 'field', style: 'flex:1;min-width:180px' }, 'Pasta', folderSelect))),
+    h('div', { class: 'row spread' },
+      h('span', { class: 'muted' }, 'Os gabaritos ficam ocultos para você não ver as respostas sem querer.'),
+      revealAllBtn),
     report, list,
     h('div', { class: 'card row spread' }, confirmLabel, saveBtn), saveError);
   renderQuestions();

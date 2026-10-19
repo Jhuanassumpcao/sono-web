@@ -26,7 +26,7 @@ export function validate(questions, keyFound) {
       const why = keyFound ? 'não consta no gabarito' : 'gabarito não encontrado';
       issues.push(issue(q.id, 'warning', 'NO_ANSWER', `${q.id}: ${why}.`));
     } else if (!keys.includes(q.answer)) {
-      issues.push(issue(q.id, 'error', 'ANSWER_NOT_IN_OPTIONS', `${q.id}: gabarito ${q.answer} não está entre as alternativas.`));
+      issues.push(issue(q.id, 'error', 'ANSWER_NOT_IN_OPTIONS', `${q.id}: o gabarito não corresponde a nenhuma alternativa.`));
     }
   }
   const n = questions.length;
