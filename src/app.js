@@ -3,7 +3,9 @@ import { icon } from './icons.js';
 import { menu } from './menu.js';
 import { openDb, StorageUnavailableError } from './storage.js';
 import { exportBackup, importBackup } from './backup.js';
-import { confirmDialog } from './dialogs.js';
+import { confirmDialog, choiceDialog } from './dialogs.js';
+import { openLoginDialog } from './login-dialog.js';
+import { initCloud } from './cloud.js';
 import * as library from './views/library.js';
 import * as importView from './views/import.js';
 import * as review from './views/review.js';
@@ -16,6 +18,49 @@ const navKeyByRoute = { '': 'library', folder: 'library', exam: 'library', resul
 const app = document.getElementById('app');
 const nav = document.getElementById('nav');
 let cleanup = null;
+let cloud = { available: false };
+let account = { user: null, status: { state: 'local' } };
+const accountSlot = h('div', { class: 'row', style: 'gap:6px;flex-wrap:nowrap' });
+
+const STATUS_LABEL = {
+  syncing: ['neutral', 'Sincronizando…'],
+  idle: ['ok', 'Sincronizado'],
+  offline: ['warn', 'Offline'],
+  error: ['bad', 'Erro ao sincronizar'],
+};
+
+function renderAccount() {
+  if (!cloud.available) { accountSlot.replaceChildren(); return; }
+  if (!account.user) {
+    accountSlot.replaceChildren(
+      h('span', { class: 'chip neutral', title: 'Seus simulados ficam só neste aparelho' }, 'Só neste aparelho'),
+      h('button', { class: 'nav-btn', onclick: () => openLoginDialog(cloud) }, icon('user'), h('span', {}, 'Entrar')));
+    return;
+  }
+  const { state, pending, error } = account.status;
+  const [tone, label] = STATUS_LABEL[state] ?? ['neutral', ''];
+  const text = state === 'offline' && pending ? `${label} · ${pending} pendente(s)` : label;
+  accountSlot.replaceChildren(
+    text ? h('span', { class: `chip ${tone}`, title: error ?? '' }, text) : null,
+    menu([
+      { label: 'Sincronizar agora', icon: 'refresh', onClick: () => cloud.syncNow?.() },
+      { label: 'Sair', icon: 'x', onClick: async () => {
+        if (await confirmDialog('Sair da conta? Seus simulados continuam salvos neste aparelho.', 'Sair')) await cloud.signOut();
+      } },
+    ], { trigger: h('button', { class: 'nav-btn', title: account.user.email }, icon('user'), h('span', {}, account.user.email.split('@')[0])) }));
+}
+
+const ask = {
+  upload: (count) => confirmDialog(`Encontramos ${count} item(ns) salvos neste aparelho. Enviar para a sua conta, para aparecerem em todos os seus aparelhos?`, 'Enviar'),
+  switchAccount: ({ hasUnsynced }) => choiceDialog('Trocar de conta',
+    `Este aparelho tem dados de outra conta${hasUnsynced ? ', inclusive alterações que ainda não foram enviadas' : ''}. Para entrar nesta conta, eles precisam sair daqui.`,
+    [
+      { label: 'Cancelar', value: 'cancel' },
+      { label: 'Apagar daqui', value: 'discard' },
+      { label: 'Baixar backup e trocar', value: 'backup', primary: true },
+    ]),
+  backup: () => downloadBackup(),
+};
 
 function parseHash() {
   const [path, qs = ''] = location.hash.replace(/^#\/?/, '').split('?');
@@ -75,7 +120,7 @@ function buildNav() {
       { label: 'Exportar backup', icon: 'download', onClick: downloadBackup },
       { label: 'Importar backup', icon: 'upload', onClick: () => fileInput.click() },
     ], { trigger: backupTrigger }),
-    themeBtn, fileInput);
+    accountSlot, themeBtn, fileInput);
 }
 
 function markActiveNav(routeName) {
@@ -115,6 +160,14 @@ async function start() {
   }
   navigator.storage?.persist?.().catch(() => {});
   window.addEventListener('hashchange', render);
+  cloud = initCloud({
+    ask,
+    onStatus: (status) => { account = { ...account, status }; renderAccount(); },
+    onUser: (user) => { account = { ...account, user }; renderAccount(); },
+    // só atualiza telas de leitura; nunca no meio de uma prova ou revisão
+    onRemoteChange: () => { if (['', 'folder', 'history'].includes(parseHash().name)) render(); },
+  });
+  renderAccount();
   render();
 }
 

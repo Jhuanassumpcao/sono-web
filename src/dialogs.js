@@ -22,6 +22,11 @@ export async function confirmDialog(message, okLabel = 'Confirmar') {
   return r === true;
 }
 
+/** Pergunta com várias respostas; `choices` = [{label, value, primary?}]. Fechar com Esc devolve undefined. */
+export function choiceDialog(title, message, choices) {
+  return modal(title, h('p', {}, message), choices.map((c) => ({ label: c.label, value: () => c.value, primary: c.primary })));
+}
+
 /** Retorna o texto digitado ou null se cancelado. */
 export async function promptDialog(title, initial = '') {
   const input = h('input', { type: 'text', value: initial });
